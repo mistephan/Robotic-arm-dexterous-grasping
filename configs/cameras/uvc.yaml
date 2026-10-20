@@ -1,0 +1,32 @@
+# Plain RGB webcam: no depth sensor. Depth comes from the table-plane
+# geometry (`table_plane_cam`, fitted once with DepthProvider.fit_table_plane
+# from an RGB-D camera, or derived from the known camera mount) or from a
+# mono-depth plugin.
+type: uvc
+device_index: 0
+width: 1280
+height: 720
+fov_deg: 70          # used to synthesize intrinsics if none given
+# intrinsics: [[fx, 0, cx], [0, fy, cy], [0, 0, 1]]
+
+# Plane in CAMERA frame (nx, ny, nz, d) with n.p + d = 0. For a camera 0.6 m
+# above the table looking straight down, the plane is z = 0.6:
+table_plane_cam: [0.0, 0.0, -1.0, 0.6]
+
+# Optional mono-depth plugin (any callable rgb->depth_m):
+# mono_depth:
+#   enabled: true
+#   entry_point: "my_depth_pkg.api:predict_metric_depth"
+
+extrinsics:
+  mode: eye_to_hand
+  T:
+    - [ 0.0, -1.0,  0.0, 0.28]
+    - [-1.0,  0.0,  0.0, 0.00]
+    - [ 0.0,  0.0, -1.0, 0.60]
+    - [ 0.0,  0.0,  0.0, 1.00]
+
+# PLACEHOLDER extrinsics + assumed table plane: as a SECONDARY rig camera
+# this must not fuse 3D beliefs until calibrated (video/overlays still
+# stream). Flip to true after measuring the mount.
+fuse_beliefs: false

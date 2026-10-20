@@ -1,0 +1,39 @@
+# Orbbec Gemini 2 顶部相机 (eye-to-hand), 主操作相机
+type: orbbec
+# serial 由 `python -m wrc_demo.scripts.calib_top_orbbec --bind` 自动回填,
+# 或在 calibration 完成后手工写入。空串 = 选第一台可用设备 (bring-up 期间允许)。
+serial: "CP965630005A"
+width: 1280
+height: 720
+fps: 30
+min_depth_m: 0.25
+max_depth_m: 2.5
+warmup_frames: 30
+
+# Hardware depth-to-color alignment (Orbbec SDK AlignFilter)
+align_depth_to_color: true
+
+extrinsics:
+  source: "${repo}/data/calibration/hand_eye_top.json"   # 找不到时仅 warn, 不参与融合
+  mode: eye_to_hand
+  # T 字段在 JSON loader 中读取后覆盖; 此处仅占位避免 schema 漂移
+  T:
+    - [1, 0, 0, 0]
+    - [0, 1, 0, 0]
+    - [0, 0, 1, 0]
+    - [0, 0, 0, 1]
+  # ADR-0009: hand-eye compensation (meters, default [0,0,0] = identity).
+  # Mirrors rebot_grasp cfg.calibration.hand_eye_compensation_m;
+  # tune when grasp pose drifts. Per-camera only -- no demo.yaml global.
+  #   ETH: T_cam2base = T_compensation @ T_hand_eye
+  #   EIH: T_cam2base = T_compensation @ T_tcp2base @ T_hand_eye
+  hand_eye_compensation_m:
+    x: 0.00
+    y: 0.00
+    z: 0.00
+
+# 该 profile 表示一台必须经过 hand-eye 标定才允许 3D 融合的相机:
+# - 标定文件存在: fuse_beliefs 由 profile 显式设为 true
+# - 标定文件缺失: demo.py build_runtime() 会强制把 fuse_beliefs 降为 false 并 stderr warn
+requires_calibration: true
+fuse_beliefs: true

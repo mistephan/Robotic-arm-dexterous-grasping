@@ -1,0 +1,4 @@
+# Cloud backend: Claude over the Anthropic API (ANTHROPIC_API_KEY env var).
+type: anthropic
+model: claude-sonnet-5
+temperature: 0.2

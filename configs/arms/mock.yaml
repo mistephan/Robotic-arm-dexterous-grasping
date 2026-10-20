@@ -1,0 +1,12 @@
+# Kinematic mock arm on the RS URDF (vendored under sdk/urdf/; the USD
+type: mock
+urdf: ${sdk}/urdf/00-arm-rs_asm-v3/urdf/00-arm-rs_asm-v3.urdf
+ee_frame: gripper_end
+n_joints: 6
+# Asset-frame home_q (matches the SDK's convention — no sign multiplication).
+home_q: [0.0, 1.2, 1.2, 0.0, 0.75, 0.0]
+
+gripper:
+  open_pos: 0.0
+  closed_pos: 1.0
+  max_width_m: 0.09

@@ -1,0 +1,20 @@
+# Intel RealSense D455f (stereo depth + IR pass filter). Same realsense
+# backend as the L515; depth scale (1 mm) is handled automatically. Min
+# depth ~0.52 m at native res -- mount accordingly.
+type: realsense
+width: 1280
+height: 720
+fps: 30
+min_depth_m: 0.4
+max_depth_m: 4.0
+warmup_frames: 15
+# serial: ""   # pin when several RealSense units are attached
+
+extrinsics:
+  mode: eye_to_hand
+  # PLACEHOLDER identity-style mount: run hand-eye calibration on the rig.
+  T:
+    - [ 0.0, -1.0,  0.0, 0.28]
+    - [-1.0,  0.0,  0.0, 0.00]
+    - [ 0.0,  0.0, -1.0, 0.60]
+    - [ 0.0,  0.0,  0.0, 1.00]

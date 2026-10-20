@@ -1,0 +1,15 @@
+# Generic 4K UVC webcam (e.g. an Elgato/USB capture "gato 4k"): RGB only.
+# Used as a context/audience camera in the rig; without a fitted table
+# plane it contributes video to the livestream but not 3D fixes.
+type: uvc
+device_index: 1
+width: 3840
+height: 2160
+fps: 30
+fov_deg: 78
+
+# Uncomment + fit to let this camera contribute 3D beliefs too:
+# table_plane_cam: [0.0, 0.0, -1.0, 0.8]
+# extrinsics:
+#   mode: eye_to_hand
+#   T: [...]

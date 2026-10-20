@@ -1,0 +1,33 @@
+# Local Qwen3-VL-2B-Instruct AWQ-4bit (官方 AWQ 量化版)。
+#
+# Architecture: Qwen3-VL-2B-Instruct (Dense VLM, native tool calling)
+# Quantization: AWQ INT4 (官方发布) -> ~2.1GB on disk
+#
+# Hardware target: RTX 5070 (Blackwell sm_120), 8 GB VRAM.
+# Server bring-up: bash scripts/start_reason2_server.sh --bg
+# (脚本默认 MODEL=${repo}/models/qwen3-vl-2b-awq-4bit,
+#  --quantization compressed-tensors, --tool-call-parser hermes,
+#  --linear-backend triton, --max-model-len 2560, --gpu-memory-utilization 0.65)
+#
+# Why Qwen3-VL-AWQ-4bit (and not Cosmos3-Edge or Cosmos-Reason2):
+# - Qwen3-VL-Instruct natively supports OpenAI tool calling, no parser hack
+#   needed. vLLM serves it via --tool-call-parser hermes; wrc_demo's
+#   OpenAICompatClient works unmodified.
+# - AWQ-INT4 fits in ~2 GB of VRAM, leaving room for the detector (~500 MB)
+#   + arm SDK + CUDA context on an 8 GB RTX 5070.
+# - Vision encoder can stay enabled (vs. the FP8 build that had to disable
+#   vision via --limit-mm-per-prompt image=0).
+#
+# Notes:
+# - served_model_name is the local path; vLLM 0.27 returns the path string
+#   from /v1/models, so use the same path in cfg.llm.model.
+# - supports_vision: false because the demo sends frames through the
+#   detector/YOLO pipeline, not the LLM's vision tower.
+# - api_key: EMPTY is the literal placeholder vLLM expects (not a secret).
+
+type: openai_compat
+base_url: http://127.0.0.1:8080/v1
+model: ${repo}/models/qwen3-vl-2b-awq-4bit
+api_key: EMPTY
+supports_vision: false
+temperature: 0.2

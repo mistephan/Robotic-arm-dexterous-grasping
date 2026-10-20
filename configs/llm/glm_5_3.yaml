@@ -1,0 +1,9 @@
+# GLM 5.3 via Zhipu AI's Anthropic-compatible API (same route as Claude Code).
+# Keep the real key out of this file:
+#   export ZHIPU_API_KEY='<your-api-key>'
+type: anthropic
+base_url: https://open.bigmodel.cn/api/anthropic
+model: glm-5.3
+auth_token_env: ZHIPU_API_KEY
+supports_vision: false
+temperature: 0.2

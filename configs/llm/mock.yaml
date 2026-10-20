@@ -1,0 +1,2 @@
+# Scripted mock LLM (tests / wiring checks). Does nothing useful on its own.
+type: mock

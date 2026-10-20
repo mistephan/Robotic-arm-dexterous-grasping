@@ -1,0 +1,12 @@
+type: openai_compat
+base_url: http://192.168.50.1:8000/v1
+model: qwen3-vl-8b
+api_key: none
+supports_vision: true
+temperature: 0.0
+# The server context window is 4096. The static system/tool schema currently
+# consumes about 3585 tokens, so 512 exceeds the limit by one before the first
+# tool call. Keep enough room for complete Hermes JSON; the client also adapts
+# this downward from the server's exact token-count error when history grows.
+max_tokens: 448
+timeout_s: 180

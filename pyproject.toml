@@ -1,0 +1,53 @@
+[project]
+name = "wrc-demo"
+version = "0.1.0"
+description = "Camera-agnostic agentic grasping demo for the reBot DevArm (RobStride) on DGX Spark"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+authors = [{ name = "Johnny Nunez", email = "johnnync13@gmail.com" }]
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "opencv-python-headless>=4.8",
+    "pyyaml>=6.0",
+    "prompt-toolkit>=3.0",
+]
+
+[project.optional-dependencies]
+# Perception extras (open-vocabulary detection). torch comes from the host env.
+perception = ["ultralytics>=8.3"]
+# LLM backends. The OpenAI client also covers llama.cpp / vLLM local servers.
+llm = ["openai>=1.50", "anthropic>=0.40"]
+# Kinematics (FK/IK on the arm URDF).
+kinematics = ["pin>=3.0"]
+# Real arm transport (RobStride over SocketCAN).
+arm = ["motorbridge>=0.4.9"]
+# Lightweight client only; the GraspGenX model stack stays on the AGX server.
+graspgenx = ["pyzmq>=25.1", "msgpack>=1.0", "msgpack-numpy>=0.4.8"]
+dev = ["pytest>=8.0", "pytest-cov>=4.0"]
+
+[project.scripts]
+wrc-demo = "wrc_demo.apps.demo:main"
+wrc-record = "wrc_demo.apps.record:main"
+wrc-mcp = "wrc_demo.apps.mcp_server:main"
+wrc-view = "wrc_demo.apps.viewer:main"
+# Hand-eye calibration (top = ETH, wrist = EIH). Need root for USB on most
+# systems; entry points let users do `sudo wrc-calib-top` instead of
+# `sudo PYTHONPATH=src python -m wrc_demo.scripts.calib_top_orbbec`.
+wrc-calib-top = "wrc_demo.scripts.calib_top_orbbec:main"
+wrc-calib-wrist = "wrc_demo.scripts.calib_wrist:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "hardware: tests that need a live camera/arm (deselected by default)",
+]
+addopts = "-m 'not hardware'"

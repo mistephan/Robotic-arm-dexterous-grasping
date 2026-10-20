@@ -1,0 +1,10 @@
+# MiniMax (OpenAI-compatible API)
+# API key is read from the MINIMAX_API_KEY environment variable, NOT
+# stored in this file. See ADR-0006 + .env.example.
+# Required:    export MINIMAX_API_KEY=<your-key>
+type: openai_compat
+base_url: https://api.minimax.chat/v1
+model: MiniMax-M3
+env_key: MINIMAX_API_KEY
+supports_vision: false
+temperature: 0.2

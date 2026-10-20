@@ -1,0 +1,89 @@
+# Real reBot DevArm B601, RobStride build, on can_arm @ 1 Mbps.
+#
+# Before first use:
+#   sudo ip link set can_arm up type can bitrate 1000000
+# and make sure motorbridge-gateway / MotorBridge Studio are NOT running
+# (host-id 0xFD conflict on can_arm).
+#
+# All motion semantics (500 Hz loop, gravity feed-forward, sign conversion)
+# live in the vendored SDK at sdk/reBotArm_control_py/. The SDK's
+# RebotArmEndPose._loop_cb owns these and is what SafeArm's waypoint_hook
+# vets per-waypoint — see sdk/README.md for the patch list.
+
+type: rebot_rs
+
+# Vendored SDK layout (see sdk/README.md):
+#   sdk/config/<hw_yaml>     — hardware YAML (joint kp/kd, motor IDs, groups)
+#   sdk/urdf/<...>/...urdf   — robot model
+#   sdk/reBotArm_control_py/ — the Python package
+hw_yaml: rebotarm_rs.yaml
+urdf: ${sdk}/urdf/00-arm-rs_asm-v3/urdf/00-arm-rs_asm-v3.urdf
+ee_frame: gripper_end
+n_joints: 6
+
+# Per-joint multiplier applied to model-derived gravity feed-forward torque.
+# Keep the model output unscaled by default. A previous hard-coded 1.55x on
+# joints 2/3 caused a repeatable upward TCP bias and ~0.03 rad steady error.
+gravity_ff_scale: [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+
+# Home pose: TCP at [0.25, 0, 0.35] with identity rotation.
+# This is the SDK's asset frame. URDF joint limits (per
+# ``wrc_demo/safety/harness.py::Kinematics``) for the RS are:
+#   joint 1 [-2.80, 2.80], joint 2 [0.0, 3.14], joint 3 [0.0, 3.14],
+#   joint 4 [-1.57, 1.57], joint 5 [-1.57, 1.57], joint 6 [-3.14, 3.14]
+# — joints 2 & 3 are positive-only (the elbow only bends one way on
+# this geometry), so the home_q signs are positive for j2/j3 and
+# negative for j4. **Verified 2026-08-10**: FK(home_q) →
+# [0.2500, 0, 0.3499] (matches SDK.compute_fk). URDF axis convention
+# now matches rebot_grasp SDK (axis signs flipped from old wrc_demo copy).
+home_q: [0.0, 0.1684, 0.6226, -0.4543, 0.0, 0.0]
+
+# Ready pose: TCP at [0.3, 0, 0.3] with (roll=0, pitch=0.7, yaw=0).
+# After skill_grasp_object closes on the object, the wrist is lifted here so
+# the box-placement trajectory only translates — the held object isn't
+# rotated in the fingers. Matches rebot_grasp set.py's _move_ready
+# (scripts/set.py:56-67) exactly. Overridable per arm profile.
+ready_pose:
+  x: 0.3
+  y: 0.0
+  z: 0.3
+  roll: 0.0
+  pitch: 0.7
+  yaw: 0.0
+  duration: 3.0
+
+# RS gripper (rs-00 + rack-pinion): counterclockwise=false means
+# positive angle = open, negative = close direction.
+# Based on rebot_grasp/config/default.yaml RS config.
+gripper:
+  open_pos: 5.0      # rad (fully open)
+  closed_pos: 0.0    # rad (fully closed)
+  # 2026-07-29: bumped 0.09 -> 0.095 to absorb a 1mm pad gap. The cyan toy
+  # has a 7.6cm short edge; OBB's grasp width = 0.076 + 0.015 pad = 0.091m,
+  # which select_grasp's strict ``> max_width_m`` filter was rejecting, so
+  # the only executable grasp candidates were infeasible and the arm
+  # never tried. 0.095 keeps the safety margin while letting the cyan
+  # toy (and any similarly-sized objects) actually be eligible for grasp.
+  max_width_m: 0.095
+  # Default per-cycle MIT tau for the gripper close (forward-feed).
+  # Threaded into SDK send_mit as the tau arg by the SDK vendor patch
+  # in sdk/README.md ("gripper send_mit now threads effort as tau").
+  # Material-aware close overrides this per-skill — see grasping/force.py.
+  effort_default: 0.6
+
+# Settling threshold for wait_settled / move-joint completion.
+# Increased from the SDK default (0.03 rad) to handle the 112° joint-2
+# change from home to pregrasp pose.
+settle_tol: 0.05
+
+# The SDK send thread finishing only means the final target was published.
+# Wait up to 3000 ms for measured joints to converge before validating TCP.
+# Hardware feedback has a repeatable ~0.026 rad residual at the ready pose.
+# Accept that small joint-level deadband; the runtime still performs the
+# stricter Cartesian post-move check (20 mm) before continuing.
+bridge_settle_tol_rad: 0.03
+bridge_settle_timeout_ms: 3000
+bridge_settle_samples: 3
+
+# Skip the fixed 3 s home trajectory when feedback says it is already parked.
+home_noop_tol_rad: 0.02

@@ -1,0 +1,7 @@
+# Any hosted OpenAI-compatible endpoint (OPENAI_API_KEY / OPENAI_BASE_URL).
+type: openai_compat
+model: gpt-5.5
+base_url: null
+api_key: null              # null -> read OPENAI_API_KEY from the environment
+supports_vision: true
+temperature: 0.2

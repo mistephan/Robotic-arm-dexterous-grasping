@@ -1,0 +1,20 @@
+# Synthetic tabletop camera for tests and dry-runs: looks straight down from
+# 0.6 m at a red 7x5 cm box sitting on the table around base (0.29, 0).
+type: mock
+width: 640
+height: 480
+table_depth_m: 0.6
+
+detector:
+  type: mock
+  label: "red cube"
+
+extrinsics:
+  mode: eye_to_hand
+  # Camera at (0.28, 0, 0.60) in base frame, optical axis straight down:
+  # cam x -> base -y, cam y -> base -x, cam z -> base -z.
+  T:
+    - [ 0.0, -1.0,  0.0, 0.28]
+    - [-1.0,  0.0,  0.0, 0.00]
+    - [ 0.0,  0.0, -1.0, 0.60]
+    - [ 0.0,  0.0,  0.0, 1.00]

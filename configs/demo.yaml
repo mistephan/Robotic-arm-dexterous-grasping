@@ -1,0 +1,350 @@
+# Main demo configuration. Camera/arm/llm profiles are merged in at load
+# time (see wrc_demo.config.load_demo_config).
+
+# Active LLM profile (CLI --llm overrides). Change to switch models; no
+# fallback cascade -- others edit this single field to pick their backend:
+#   local_qwen3_vl  -> local 4-bit Qwen3-VL via start_cosmos3_server.sh
+#   minimax         -> MiniMax cloud API (needs MINIMAX_API_KEY env var)
+#   anthropic       -> Anthropic Claude (needs ANTHROPIC_API_KEY env var)
+#   openai          -> OpenAI / OpenAI-compat (needs OPENAI_API_KEY)
+#   mock            -> scripted mock (offline / smoke test)
+llm:
+  profile: agx_qwen3vl
+
+safety:
+  # Base-frame workspace AABB for the TCP (meters). Verified against the RS
+  # URDF top-down IK reachability probe (x 0.15..0.45, y +-0.25).
+  workspace:
+    min: [0.10, -0.15, -0.01]
+    max: [0.50, 0.30, 0.55]
+  table_z: 0.0            # table surface height in base frame
+  table_clearance: 0.02   # TCP keeps this far above the table outside grasps
+  max_joint_vel: 1.2      # rad/s, enforced per streamed waypoint
+  joint_margin: 0.02      # rad inside URDF limits
+  watchdog_s: 10.0         # halt motion if perception is staler than this
+  keep_out: []            # e.g. [{min: [x,y,z], max: [x,y,z]}] for the tripod
+
+grasp:
+  # Grasp planner: "obb" (analytic, always available) or "graspgenx"
+  # (learned 6-DoF via the ZMQ server -- scripts/serve_graspgenx.sh; falls
+  # back to OBB automatically if the server is down)
+  # GraspGenX runs on the AGX and is reached over the robot LAN. Any timeout
+  # or protocol error still falls back to the local camera/OBB planners.
+  backend: obb # [ graspgenx, obb]
+  # Wrist-roll budget for a pregrasp relative to the seed (home). joint6 is
+  # +-3.14 rad in the URDF; the old 2.8 default rejected valid solutions at
+  # lateral positions (2026-09-22 run 124241: best branch needed 2.934 and
+  # one rejection was by 0.003 rad). 3.05 stays 0.065 inside the IK clamp.
+  max_wrist_delta_rad: 3.05
+  # Closing-axis yaw relaxation appended to camera/OBB candidates as a
+  # wrist-feasibility fallback (see runtime._yaw_shimmed). Set [] to disable.
+  yaw_shim_degrees: [15, -15, 30, -30]
+  graspgenx:
+    host: 192.168.50.1
+    port: 5556
+    gripper: franka_panda   # fallback when `sweep` is removed
+    num_grasps: 100
+    planner: obb          # [diffusion, graspmoe, obb]
+    topk: 32
+    moe_num_yaws: 18      # 20-degree spacing; tilt diversity replaces redundant 10-degree yaw grid
+    moe_tilt_degrees: [0, -12, 12, -20, 20]
+    moe_skip_obb_rule: never  # O6 sweep X=21mm is volume thickness, not max opening
+    max_per_tilt_bin: 8  # keep top-k diverse; do not spend all IK on vertical yaw variants
+    min_score: 0.0          # server-wide; retain useful GraspMoE OBB poses
+    diff_min_score: 0.01    # reject effectively-zero diffusion scores
+    candidate_xy_margin_m: 0.025
+    candidate_max_above_cloud_m: 0.030
+    # Curved elongated produce (banana): estimate closing direction and width
+    # around each candidate rather than from the global OBB/PCA chord.
+    local_curve_geometry: true
+    local_width_height_ratio: 1.15
+    local_width_pad_m: 0.010
+    timeout_ms: 8000
+    # GraspGen-X returns the re-originated model-base pose. Convert it to the
+    # RS gripper_end TCP by advancing 35 mm along the +Z approach axis.
+    tip_offset_m: 0.035
+    # Insert toward, but never beyond, the localized object center. This avoids
+    # stopping at the visible top surface; code caps insertion per candidate.
+    insertion_depth_m: 0.015
+    # Rounded produce needs deeper insertion because overhead depth mostly sees
+    # the cap. Aim 20 mm below cloud top, capped at 30 mm total insertion.
+    produce_insertion_depth_m: 0.030
+    produce_target_below_cloud_top_m: 0.020
+    # For near-round fruit, estimate radius from the robust XY cloud span.
+    # The visible cap underestimates the full diameter, hence the extra 5 mm.
+    produce_center_from_xy: true
+    produce_center_extra_depth_m: 0.005
+    produce_min_tcp_above_table_m: 0.010
+    # Reject a high anchor when the 30 mm safety cap still cannot reach the
+    # requested jaw-centre depth. This is a tolerance, not extra insertion.
+    produce_max_insertion_shortfall_m: 0.003
+    # A full 3-D TCP offset may initially convert a valid model-base pose to a
+    # point below the desired object depth. Permit a bounded reverse approach
+    # correction before rejecting it; the final TCP still obeys table safety.
+    produce_max_retraction_m: 0.060
+    # Near-isotropic objects have no meaningful grasp yaw. Retain only two
+    # wrist-neutral yaw choices per branch/tilt instead of full-circle noise.
+    isotropic_aspect_ratio: 1.40
+    isotropic_max_yaws_per_branch_tilt: 2
+    isotropic_preferred_jaw_axis_xy: [0.0, 1.0]
+    # Official GraspGen-X wizard calibration for the B601 parallel jaw.
+    # The calibrated volume was centered 35 mm behind gripper_end; this
+    # params-only representation re-origins the model frame at that center.
+    # +Z is approach and +X points from the right jaw to the left jaw.
+    sweep:
+      extents_open: [0.1001464610, 0.0384539982, 0.0500000000]
+      offset_open: [0.0, 0.0000001167, 0.0]
+      extents_mid: [0.0500732305, 0.0384539982, 0.0500000000]
+      offset_mid: [0.0, 0.0000001167, 0.0]
+      gripper_type: 0
+      fingertip_depth: 0.035
+  # NOTE: strict top-down tool poses are only IK-reachable below z~0.15 on
+  # the B601-RS (wrist limits); keep grasp_z + offset under that.
+  pregrasp_offset_m: 0.05   # hover height above the grasp along -approach.
+                            # Kept small: tall (12 cm) blocks are grasped near
+                            # z~0.10, and a larger hover pushes the pregrasp
+                            # pose above z~0.15 where top-down IK fails on the
+                            # B601-RS.
+  # Camera-frame planner (rebot_grasp-style, primary when segmentation
+  # mask + depth are available): the approach direction aligns with the
+  # camera's line of sight, so a tilted camera doesn't bias the grasp
+  # geometry.
+  #
+  # insertion_depth_m adds an extra TCP offset along tool-x on top of
+  # rebot_grasp's ``hand_eye_compensation_m`` (which is already baked
+  # into ``data/calibration/hand_eye_top.json`` as a z=-0.02 camera-
+  # frame shift). rebot_grasp's own ``scripts/main.py:320`` does NOT
+  # pass insertion_depth_m to ``transform_grasp_pose_to_base`` -- it
+  # relies on the 2 cm compensation alone, which gives the equivalent
+  # of a 20 mm gripper-finger offset. Set to 0 here to match rebot_grasp;
+  # raise if your gripper has a longer tip-to-TCP offset.
+  insertion_depth_m: 0.0    # matches rebot_grasp; see calibration file
+  depth_fraction: 0.35      # grasp this far down from the object's TOP. Low
+                            # value = grasp near the top face, which keeps the
+                            # gripper fingers (they extend ~5cm below the TCP)
+                            # above the table on tall blocks.
+  exempt_radius_m: 0.15     # grasp-descent safety cylinder radius. Must
+                            # cover the gripper_end link's horizontal offset
+                            # from the object center during a top-down
+                            # descent, not just the jaw tips -- at 0.07 the
+                            # reBot RS wrist link tripped "link 7 would hit
+                            # the table" (z=0.009) just OUTSIDE the cylinder.
+                            # Only opens during the descent over the target.
+  move_duration_s: 2.5
+  descend_duration_s: 2.0
+  release_height_m: 0.05    # place_at default: TCP release height above table
+  # Named-destination bridge TCP height. The experiment wicker-basket rim is
+  # 75 mm; 140 mm leaves 65 mm TCP clearance while remaining below the ~145 mm
+  # top-down wrist ceiling.
+  bridge_release_height_m: 0.14
+  # Relative placement uses the ROBOT BASE frame: +Y=left, -Y=right.
+  # The reference object is re-localized immediately before placement.
+  relative_place_offset_m: 0.08
+  release_clearance_m: 0.06 # place_on_object: drop height above target top
+  # Smart placement reuses the successful grasp TCP height relative to the
+  # source support surface, then adds a small release gap at the destination.
+  place_release_clearance_m: 0.008
+  place_support_offset_min_m: 0.015
+  place_support_offset_max_m: 0.060
+  release_settle_s: 1.0     # keep jaws open at drop point before retracting
+  gripper_open_timeout_s: 6.0  # loaded B601 can need >3s to release fully
+  gripper_close_timeout_s: 4.0 # empty jaws are parked closed at home
+  pregrasp_open_margin_m: 0.0  # planner width already includes jaw padding;
+                               # avoid sweeping the wide finger guards fully open
+  # Torque used only to overcome rack-pinion friction while jaws travel.
+  # After contact, the material profile (slippery=0.35) remains the hold force.
+  gripper_close_motion_effort: 0.70
+  air_grasp_frac: 0.04      # jaw open-fraction below this after close = missed
+  close_settle_s: 0.4       # generic two-stage close dwell (real arm ignores)
+  drop_zone: [0.18, -0.10]  # pick_and_place default target = the bin, inside
+                            # the B601-RS top-down IK envelope (reachable place)
+  home_after_place: true    # clear the camera view after each pick_and_place
+  topdown_z_max: 0.15       # strict top-down poses are IK-unreachable above
+                            # this on the B601-RS (wrist limits)
+  # Object-level place constraint (task space, NOT wrist joints): after a
+  # grasp the TCP rotation at the moment of close is recorded as the level
+  # reference (the object still rests level on the table then). Place
+  # keeps the object's up axis within max_object_tilt_deg of world +Z
+  # while yaw about world Z and small tilts are SEARCHED for IK
+  # feasibility -- freezing the carried wrist orientation starved IK and
+  # made place fail on reachable destinations. No 45/90-deg flips.
+  max_object_tilt_deg: 12
+  place_yaw_search_deg: [0, 15, -15, 30, -30, 45, -45, 60, -60, 90, -90, 120, -120, 180]
+  place_tilt_search_deg: [0, 5, -5, 10, -10]
+  # Search small tilt around both independent world-horizontal axes.
+  place_tilt_axis_deg: [0, 90]
+  carry_yaw_search_deg: [0, 15, -15]
+  carry_tilt_search_deg: [0, 5, -5, 10, -10]
+  carry_tilt_axis_deg: [0, 90]
+  local_place_yaw_search_deg: [0, 15, -15, 30, -30]
+  local_place_tilt_search_deg: [0, 5, -5, 10, -10]
+  local_place_tilt_axis_deg: [0, 90]
+  # Relative placement uses projected base-Y half extents of both objects
+  # plus this visible gap; 80 mm remains only the minimum centre distance.
+  relative_place_clearance_m: 0.05
+  relative_place_max_offset_m: 0.16
+  place_margin_weight: 0.5  # candidate score subtracts weight * min joint-limit margin
+  place_ik_retries: 1       # per-candidate IK restarts during the scan (cheap;
+                            # the O6 URDF measures ~18 ms per solve at retries=1)
+  place_long_axis_aspect_min: 1.6  # OBB elongation that triggers the long-axis
+                            # (banana) filter: |long_axis . z| < sin(max_tilt)
+  # Do not interpret a transient all-zero pressure frame as a dropped fruit.
+  # A verified grasp remains authoritative during recovery/carry startup;
+  # after that, multiple independent checks must agree before held state clears.
+  held_contact_grace_s: 8.0
+  held_contact_loss_checks: 3
+  # Continuous tilt AWAY from vertical down: 0=top-down, pi/2=horizontal.
+  # Offline IK at the banana pose verified 0.2 rad (11.5 deg) for both
+  # pregrasp and grasp; exact 0.0 remains outside the current elbow-up basin.
+  approach_tilt_from_vertical_rad: 0.2
+  # Backends are validated in tiers; their raw quality scores are not comparable.
+  source_priority: [graspgenx, camera_grasp, analytic_obb]
+  # GraspMoE branches are not equivalent: learned diffusion understands local
+  # shape; discriminator-rescored OBB remains the robust fallback.
+  graspgenx_branch_priority: [diff, obb]
+  # Same-discriminator scores remain authoritative: branch preference only
+  # breaks ties inside this score band, never masks a clearly better OBB.
+  graspgenx_branch_score_band: 0.10
+  # A two-finger gripper is unchanged by 180 degrees about approach. Solve
+  # both representations and execute the lower joint-travel wrist solution.
+  parallel_jaw_symmetry: true
+  wrist_motion_weight: 2.0
+  # Inside each backend tier, try approaches within 45 degrees of vertical
+  # before side approaches. This is grasp geometry policy, not an occlusion
+  # workaround; side grasps remain available for objects that need them.
+  prefer_topdown_max_tilt_rad: 0.785
+  # For elongated masks, reject candidate jaw axes inconsistent with the
+  # segmentation-derived local short direction (abs cosine threshold).
+  elongated_axis_min_alignment: 0.75
+  # Curved objects need both a locally correct direction and a contact point
+  # near the fitted centerline; direction alone can select empty space.
+  elongated_max_centerline_offset_m: 0.012
+  # Persistence: pick_and_place keeps retrying (re-home, re-scan, fresh
+  # grasp plan) until it succeeds or one of these budgets runs out.
+  persist_seconds: 120
+  max_pick_attempts: 5
+  min_grasp_z_m: 0.008      # learned grasp z a few mm below this above the
+                            # table is clamped up (tip-offset overshoot),
+                            # not aborted
+
+memory:
+  horizon_s: 15.0           # episodic window the agent can consult
+
+# Object-permanence belief store (dashboard "objects in the world model").
+# Anti-accumulation: without these, one physical object showed as N rows
+# whenever its observed position jumped > match_radius_m (object moved by
+# hand, two cameras disagreeing on extrinsics, elongated-object jitter) --
+# beliefs are otherwise kept for the whole run (object permanence).
+beliefs:
+  match_radius_m: 0.08     # same-label obs within this radius fuse (EMA)
+  stale_revive_s: 5.0      # obs far from ALL same-label beliefs, all stale
+                           # (>5s unseen) -> revive the stalest in place
+                           # (object was moved) instead of adding a row
+  max_per_label: 2         # evict STALE same-label duplicates beyond this
+                           # count; live beliefs are never evicted (real
+                           # extra instances survive)
+  forget_after_s: null     # null = keep beliefs for the whole run
+
+# Dashboard mic button (push-to-talk, up to 30 s per recording).
+# POST /asr -> transcription. Two interchangeable backends:
+#   local  : faster-whisper runs on THIS machine (simple, but transcription
+#            competes for CPU with perception + the 500 Hz control loop)
+#   remote : a whisper HTTP server on the AGX does the work -- run
+#            scripts/serve_whisper_agx.py there (see its docstring)
+# faster-whisper is a POST-INSTALL pip step (like pyorbbecsdk2 -- NOT in
+# environment.yml):   PYTHONNOUSERSITE=1 pip install faster-whisper
+# First transcription downloads the model from HuggingFace -- run one
+# throwaway recording while online to cache it for the offline rig.
+voice:
+  enabled: true
+  backend: remote           # remote (AGX, deployed 2026-09-17) | local
+  url: http://192.168.50.1:8001/asr   # the AGX: ~/projects/wrc-asr (start.sh/stop.sh)
+  # On demo startup the AGX service is health-checked and, when down,
+  # auto-started over this ssh alias (passwordless). The AGX itself must
+  # be powered on; if it is off, voice quietly disables for the session.
+  ssh_host: agx
+  model: base               # local backend only: tiny | base | small
+  device: cpu
+  compute_type: int8
+  language: null            # null = auto-detect (zh/en both fine)
+  # Spoken announcements: key events -> Piper TTS on the AGX -> USB speaker
+  # (C-Media USB card, plays via aplay). Key events only -- grasp/place
+  # outcomes, safety stops, task start/finish. See voice/tts.py::announce_text.
+  speak:
+    enabled: true
+    tts_url: http://192.168.50.1:8001/tts    # same AGX service, /tts route
+    alsa_device: plughw:CARD=Device          # the USB speaker's ALSA name
+    # Hardware mixer level (the alsamixer 'Speaker' control), re-applied at
+    # every demo start -- manual alsamixer edits reset when the USB speaker
+    # loses power. Card referenced BY NAME: indices shift on replug.
+    hw_volume: "92%"
+    timeout_s: 30
+
+# Always-on perception: every rig camera feeds the belief store continuously
+# so commands resolve against an already-warm world model.
+perception_loop:
+  enabled: true
+  rate_hz: 3.0              # detector passes per second across the rig
+  belief_fallback_age_s: 3.0  # grasp-from-memory allowed if the object was
+                              # seen this recently BEFORE the motion started
+  localize_frames: 3        # detector passes per localize before falling
+                            # back to the belief store (single frames flicker)
+
+# MJPEG livestream dashboard (stdlib HTTP; browsers/Hermes users watch here).
+stream:
+  enabled: true
+  host: 0.0.0.0
+  # Browser-facing Jetson Wi-Fi address. The server still binds all
+  # interfaces; override at launch with WRC_STREAM_ADVERTISE_HOST if DHCP
+  # changes this address.
+  advertise_host: 10.0.130.116
+  port: 8090
+  fps: 15
+  quality: 80
+  # Self-signed HTTPS so browsers grant mic access (getUserMedia) on LAN
+  # addresses -- Chrome/Edge only allow the mic on https:// or localhost.
+  # A cert is generated on first start (~/.wrc_demo/stream_tls_*.pem) and
+  # cached; every browser shows a one-time warning, click through it.
+  # Falls back to plain HTTP if openssl is unavailable.
+  tls: true
+
+detector:
+  # Open-vocabulary YOLO (YOLOE / YOLO-World). Ultralytics auto-downloads
+  # the weights into ${repo}/models on first use if absent, so the demo is
+  # object-agnostic out of the box (any visitor object localizes by name).
+  # Override with $WRC_DETECTOR_MODEL for a hand-tuned checkpoint.
+  # 2026-09-03: switched from yoloe-11s-seg → yoloe-26s-seg (session 2).
+  # Reason: yoloe-11s needs mobileclip_blt.ts (572 MB, slow download, often
+  # blocked by network). yoloe-26s uses mobileclip2_b.ts which we already
+  # have. Same backbone family as yoloe-26l; 26l is ~2x slower per frame
+  # but marginally better on first deployment. 26s is the recommended
+  # default; switch back to 11s only if a specific detection task needs it.
+  type: yoloe
+  model: ${repo}/models/yoloe-26l-seg.pt
+  device: cuda:0
+  # Calibrated against the overhead-camera frame from 2026-09-11: the
+  # strongest real package scored 0.0805, so 0.20 suppressed every object.
+  # Keep this above the ~0.005 weak candidates to avoid flooding the world
+  # model with false positives.
+  conf: 0.10
+  # Explicit `look around` uses the full camera scale for small objects;
+  # the continuous watcher keeps YOLOE's faster default input size.
+  look_imgsz: 1280
+
+# Default vocabulary scanned during get_observation (the agent can localize
+# anything by name on top of this).
+detect_classes: [
+  "orange",
+  "banana",
+  "mango",
+  "red apple",
+  "lime",
+  "watermelon slice",
+  "pear",
+  "wicker basket",
+]
+
+# ADR-0009 per-camera hand-eye manual compensation lives in each camera
+# profile's extrinsics.hand_eye_compensation_m (see configs/cameras/*.yaml).
+# No demo.yaml-level global -- every camera must declare its own value
+# explicitly to avoid silent inheritance when new cameras are added.

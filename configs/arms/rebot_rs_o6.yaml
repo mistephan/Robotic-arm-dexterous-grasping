@@ -1,0 +1,174 @@
+# Real reBot DevArm B601, RobStride build, on can_arm @ 1 Mbps.
+#
+# Before first use:
+#   sudo ip link set can_arm up type can bitrate 1000000
+# and make sure motorbridge-gateway / MotorBridge Studio are NOT running
+# (host-id 0xFD conflict on can_arm).
+#
+# All motion semantics (500 Hz loop, gravity feed-forward, sign conversion)
+# live in the vendored SDK at sdk/reBotArm_control_py/. The SDK's
+# RebotArmEndPose._loop_cb owns these and is what SafeArm's waypoint_hook
+# vets per-waypoint — see sdk/README.md for the patch list.
+
+type: rebot_rs
+
+# Vendored SDK layout (see sdk/README.md):
+#   sdk/config/<hw_yaml>     — hardware YAML (joint kp/kd, motor IDs, groups)
+#   sdk/urdf/<...>/...urdf   — robot model
+#   sdk/reBotArm_control_py/ — the Python package
+hw_yaml: rebotarm_rs_o6.yaml
+urdf: ${repo}/assets/urdf/rebot_b601_linkerhand_o6/rebot_b601_linkerhand_o6.urdf
+ee_frame: o6_grasp_tcp
+n_joints: 6
+
+end_effector:
+  type: linkerhand_o6
+  tcp_calibrated: true
+  poses_calibrated: true
+  # The TCP is the physical three-finger closure centre; do not add a second
+  # palm-to-object standoff in the planners.
+  tcp_standoff_m: 0.0
+  graspgenx:
+    calibrated: true
+    # URDF/STL-derived closure centre in hand_base_link at thumb-yaw raw=87.
+    # Position and orientation are intentionally decoupled: this point is not
+    # assumed to lie on the custom +Z approach axis.
+    tcp_offset_xyz_m: [0.0600, 0.0275, 0.1187]
+    tcp_offset_frame: hand_base_link
+    # Columns are custom X (actual thumb <-> index/middle closing direction),
+    # Y, and Z (the closest direction to the old centre ray that is exactly
+    # orthogonal to X), expressed in hand_base_link.
+    grasp_frame_rotation_matrix:
+      - [-0.65560, 0.28714, 0.69839]
+      - [-0.13800, -0.95486, 0.26305]
+      - [0.74240, 0.07608, 0.66563]
+    # GraspGenX returns [X=closing, Y, Z=approach]. WRC/IK expects TCP +X
+    # to be approach, so publish TCP axes [custom Z, custom X, custom Y].
+    tcp_rotation_matrix:
+      - [0.0, 1.0, 0.0]
+      - [0.0, 0.0, 1.0]
+      - [1.0, 0.0, 0.0]
+    tip_offset_m: 0.0
+    moe_skip_obb_rule: never
+    sweep:
+      extents_open: [0.021, 0.060, 0.070]
+      offset_open: [0.029, -0.001, 0.099]
+      extents_mid: [0.025, 0.058, 0.035]
+      offset_mid: [0.029, -0.001, 0.079]
+      gripper_type: 2       # server map: 0=parallel_2f, 1=revolute_2f, 2=revolute_3f
+      fingertip_depth: 0.099
+  side: right
+  can_interface: can_hand
+  sdk_root: ${sdk}/linkerhand-python-sdk
+  # Start conservatively; calibrate these on the installed right hand.
+  open_pose: [255, 87, 255, 255, 255, 255]
+  power_target: [110, 87, 120, 107, 107, 107]
+  pinch_target: [114, 87, 120, 255, 255, 255]
+  # Elevated, bulky objects suit the O6 power grasp from the side. Low objects
+  # stay top-down so the palm/fingers do not sweep through the support plane.
+  grasp_directions:
+    # Top-down stabilization: force the calibrated three-finger grasp
+    # approach axis to world -Z. This keeps the actual thumb <-> index/middle
+    # closing direction parallel to the table.
+    strict_grasp_topdown: true
+    side_min_center_height_m: 0.07
+    elevated_tilts_from_vertical_rad: [0.0] # [0.2, 0.7, 1.2]
+    low_tilts_from_vertical_rad: [0.0]
+  # Moderately faster than the original 80 setting while retaining tactile
+  # per-finger stopping. Avoid 255 here: full speed made the stepped tactile
+  # close visibly shake and can mark soft fruit before contact is confirmed.
+  speed: [120, 120, 120, 120, 120, 120]
+  soft_torque: [55, 55, 55, 55, 55, 55]
+  baseline_samples: 5
+  baseline_max: 20
+  contact_peak: 35
+  contact_sum: 120
+  # Reject one-frame noise: freeze a finger after three consecutive contact
+  # frames. Other fingers continue closing independently to contact/target.
+  contact_confirm_frames: 3
+  # The tactile element uses a 12-bit ADC internally, but CAN B1..B5 sends
+  # one byte per taxel, so the SDK output used here is 0..255. Keep this
+  # baseline-subtracted emergency threshold near transmitted saturation;
+  # 209 observed on banana contact remains below the hard-stop threshold.
+  hard_peak: 245
+  step: 10
+  timeout_s: 6.0
+  sample_period_s: 0.06
+  # Stop active closing immediately after a stable thumb + two opposing
+  # finger contact. Then reduce torque so soft fruit is held, not squeezed.
+  verified_hold_settle_s: 0.0
+  verified_hold_contact_count: 3
+  hold_torque: [45, 45, 45, 45, 45, 45]
+  pinch_max_width_m: 0.04
+
+# Compatibility geometry values used by grasp candidate filtering.
+# Commands go to LinkerHandO6, not to an RS gripper motor.
+gripper:
+  open_pos: 1.0
+  closed_pos: 0.0
+  max_width_m: 0.11
+  effort_default: 0.25
+
+# Per-joint multiplier applied to model-derived gravity feed-forward torque.
+# Keep the model output unscaled by default. A previous hard-coded 1.55x on
+# joints 2/3 caused a repeatable upward TCP bias and ~0.03 rad steady error.
+gravity_ff_scale: [1.0, 0.99, 0.97, 1.0, 1.0, 1.0]
+
+# Natural joint-space Home: raise the shoulder/elbow without rotating the
+# base or wrist sideways. With the longer O6 TCP this places the virtual
+# grasp centre at approximately [0.2133, 0.0200, 0.3499] m; preserving a
+# simple, predictable arm posture is more important than forcing x/y to
+# [0.25, 0.0] through a 30.7-degree joint-1/joint-5 counter-rotation.
+home_q: [0.0, 0.1684, 0.6226, -0.4543, 0.0, 0.0]
+
+# O6 ready is a fixed natural joint posture. Keep the base and wrist neutral;
+# from mechanical zero the shoulder/elbow joints do the lift instead of an IK
+# solution counter-rotating joint 1 and joint 5 (the observed "twisted waist").
+ready_q: [0.0, 0.1684, 0.6226, -0.4543, 0.0, 0.0]
+# ready_q: [0.0, 0.5236, 0.5236, -0.5236, 0.0, 1.5708]
+
+# While tactile confirms an object is held, never rotate to home_q/ready_q.
+# First lift vertically clear of the table, then search these compact carry
+# positions in order. Orientation is NOT fixed: yaw is free and object tilt
+# remains bounded by max_object_tilt_deg. If none is feasible the arm stays
+# at the safe vertical-lift pose.
+held_carry_z_m: 0.16
+held_carry_xyz_candidates_m:
+  - [0.28, 0.02, 0.20]
+  - [0.30, 0.00, 0.20]
+  - [0.26, 0.04, 0.20]
+held_carry_duration_s: 2.0
+held_carry_max_xy_step_m: 0.10  # split long carry moves into vetted XY segments
+
+# Cartesian metadata/fallback for tools that do not consume ready_q.
+ready_pose:
+  x: 0.3
+  y: 0.0
+  z: 0.3
+  roll: 1.570893
+  pitch: 0.000007
+  yaw: 1.570796
+  duration: 3.0
+
+# RS gripper (rs-00 + rack-pinion): counterclockwise=false means
+# positive angle = open, negative = close direction.
+# Based on rebot_grasp/config/default.yaml RS config.
+
+# Settling threshold for wait_settled / move-joint completion.
+# O6 has a long TCP, so require tighter joint convergence before accepting
+# a grasp pose; 0.05 rad previously amplified to about 21 mm at the TCP.
+# Final pregrasp-to-grasp trajectory duration (parallel gripper keeps 1.5 s).
+grasp_duration_s: 2.0
+settle_tol: 0.02
+
+# The SDK send thread finishing only means the final target was published.
+# Wait up to 3000 ms for measured joints to converge before validating TCP.
+# Hardware feedback has a repeatable ~0.026 rad residual at the ready pose.
+# Accept that small joint-level deadband; the runtime still performs the
+# stricter Cartesian post-move check (20 mm) before continuing.
+bridge_settle_tol_rad: 0.03
+bridge_settle_timeout_ms: 3000
+bridge_settle_samples: 3
+
+# Skip the fixed 3 s home trajectory when feedback says it is already parked.
+home_noop_tol_rad: 0.02

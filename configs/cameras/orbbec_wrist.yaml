@@ -1,0 +1,17 @@
+# Orbbec Gemini 2 腕部相机 (辅助视角)
+# 当前阶段不做手眼标定 (eye_in_hand), 仅 stream + overlay; 绝不参与 3D 融合.
+type: orbbec
+serial: "AY3794300W4"
+width: 1280
+height: 720
+fps: 30
+min_depth_m: 0.15
+max_depth_m: 1.5
+warmup_frames: 10
+
+align_depth_to_color: true
+
+# extrinsics 块故意不填 (handoff 到 demo.py: 缺 extrinsics 即不能 fusion)
+
+requires_calibration: true   # 即便 user 误改 fuse_beliefs: true 也被强制降级
+fuse_beliefs: false          # 硬约束: 本期不准参与 3D 融合
